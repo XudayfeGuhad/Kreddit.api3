@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Kreddit.Api.Data;
 using Kreddit.api3.Models;
 using Microsoft.EntityFrameworkCore;
@@ -7,9 +8,27 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite("Data Source=kreddit.db"));
 
+// CORS: tillad Blazor-klienten at kalde API'et
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowBlazor", policy =>
+    {
+        policy.WithOrigins("http://localhost:5202")
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+
+// Undgå "object cycle"-fejl ved serialisering af Post -> Comments -> ...
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
+});
+
 var app = builder.Build();
 
-app.UseHttpsRedirection();
+// Skal stå før endpoints
+app.UseCors("AllowBlazor");
 
 // GET /posts/
 app.MapGet("/posts/", async (AppDbContext db) =>
@@ -47,18 +66,16 @@ app.MapPost("/posts/{id}/comments",
     async (int id, Comment comment, AppDbContext db) =>
 {
     var post = await db.Posts
+        .Include(p => p.Comments)
         .FirstOrDefaultAsync(p => p.Id == id);
 
     if (post is null)
         return Results.NotFound();
 
-    db.Comments.Add(comment);
-
+    post.Comments.Add(comment);   // EF kobler kommentaren til posten
     await db.SaveChangesAsync();
 
-    return Results.Created(
-        $"/posts/{id}/comments",
-        comment);
+    return Results.Created($"/posts/{id}/comments", comment);
 });
 
 // PUT /posts/{id}/upvote/
@@ -71,7 +88,6 @@ app.MapPut("/posts/{id}/upvote/",
         return Results.NotFound();
 
     post.Upvotes++;
-
     await db.SaveChangesAsync();
 
     return Results.Ok(post);
@@ -87,7 +103,6 @@ app.MapPut("/posts/{id}/downvote/",
         return Results.NotFound();
 
     post.Downvotes++;
-
     await db.SaveChangesAsync();
 
     return Results.Ok(post);
@@ -97,14 +112,15 @@ app.MapPut("/posts/{id}/downvote/",
 app.MapPut("/posts/{postid}/comments/{commentid}/upvote/",
     async (int postid, int commentid, AppDbContext db) =>
 {
-    var comment = await db.Comments
+    var comment = await db.Posts
+        .Where(p => p.Id == postid)
+        .SelectMany(p => p.Comments)
         .FirstOrDefaultAsync(c => c.Id == commentid);
 
     if (comment is null)
         return Results.NotFound();
 
     comment.Upvotes++;
-
     await db.SaveChangesAsync();
 
     return Results.Ok(comment);
@@ -114,14 +130,15 @@ app.MapPut("/posts/{postid}/comments/{commentid}/upvote/",
 app.MapPut("/posts/{postid}/comments/{commentid}/downvote/",
     async (int postid, int commentid, AppDbContext db) =>
 {
-    var comment = await db.Comments
+    var comment = await db.Posts
+        .Where(p => p.Id == postid)
+        .SelectMany(p => p.Comments)
         .FirstOrDefaultAsync(c => c.Id == commentid);
 
     if (comment is null)
         return Results.NotFound();
 
     comment.Downvotes++;
-
     await db.SaveChangesAsync();
 
     return Results.Ok(comment);
