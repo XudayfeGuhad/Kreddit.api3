@@ -27,7 +27,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 var app = builder.Build();
 
-// ---------- Testdata ved opstart (kun hvis databasen er tom) ----------
+// Testdata ved opstart (kun hvis databasen er tom)
+// Data gemmes dog nu når man opretter et post eller comment
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
